@@ -371,6 +371,19 @@ mod test_admin {
     }
 
     #[test]
+    fn accept_transfer_without_pending_admin_is_rejected() {
+        let (env, contract_id, admin) = setup_with_admin();
+
+        let result = env.as_contract(&contract_id, || {
+            AdminStorage::accept_admin_transfer(&env, &admin)
+        });
+        assert_eq!(result, Err(QuickLendXError::OperationNotAllowed));
+        assert_eq!(get_admin(&env, &contract_id), Some(admin));
+        assert_eq!(get_pending_admin(&env, &contract_id), None);
+        assert!(!is_transfer_locked(&env, &contract_id));
+    }
+
+    #[test]
     fn two_step_cancel_clears_pending_and_lock() {
         let (env, contract_id, admin_1) = setup_with_admin();
         let admin_2 = existing_destination(&env);
@@ -380,6 +393,19 @@ mod test_admin {
         cancel_admin_transfer(&env, &contract_id, &admin_1).unwrap();
 
         assert_eq!(get_admin(&env, &contract_id), Some(admin_1));
+        assert_eq!(get_pending_admin(&env, &contract_id), None);
+        assert!(!is_transfer_locked(&env, &contract_id));
+    }
+
+    #[test]
+    fn cancel_transfer_without_pending_admin_is_rejected() {
+        let (env, contract_id, admin) = setup_with_admin();
+
+        let result = env.as_contract(&contract_id, || {
+            AdminStorage::cancel_admin_transfer(&env, &admin)
+        });
+        assert_eq!(result, Err(QuickLendXError::OperationNotAllowed));
+        assert_eq!(get_admin(&env, &contract_id), Some(admin));
         assert_eq!(get_pending_admin(&env, &contract_id), None);
         assert!(!is_transfer_locked(&env, &contract_id));
     }
@@ -526,6 +552,35 @@ mod test_admin {
             set_admin_legacy(&env, &contract_id, &candidate),
             Err(QuickLendXError::NotAdmin)
         );
+    }
+
+    #[test]
+    fn verify_admin_handover_covers_uninitialized_and_initialized_paths() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let proposed = existing_destination(&env);
+
+        assert!(!is_admin(&env, &contract_id, &admin));
+
+        let not_initialized = env.as_contract(&contract_id, || {
+            AdminStorage::verify_admin_handover(&env, &proposed)
+        });
+        assert_eq!(not_initialized, Err(QuickLendXError::OperationNotAllowed));
+
+        let _ = initialize_admin(&env, &contract_id, &admin);
+
+        assert!(is_admin(&env, &contract_id, &admin));
+
+        let self_target = env.as_contract(&contract_id, || {
+            AdminStorage::verify_admin_handover(&env, &admin)
+        });
+        assert_eq!(self_target, Err(QuickLendXError::OperationNotAllowed));
+
+        let fresh_candidate = Address::generate(&env);
+        let valid = env.as_contract(&contract_id, || {
+            AdminStorage::verify_admin_handover(&env, &fresh_candidate)
+        });
+        assert_eq!(valid, Ok(()));
     }
 
     #[test]
